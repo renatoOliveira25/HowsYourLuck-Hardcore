@@ -1,10 +1,13 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+const player = require('play-sound')();
 
 export function activate(context: vscode.ExtensionContext) {
 
 	console.log("How's Your Luck is active 😈");
+
+	const soundPath = path.join(context.extensionPath, 'assets', 'fahhhhh.mp3');
 
 	const disposable = vscode.workspace.onDidSaveTextDocument(async (document) => {
 
@@ -39,6 +42,12 @@ export function activate(context: vscode.ExtensionContext) {
 		try {
 
 			await vscode.workspace.fs.delete(vscode.Uri.file(unluckyFile));
+
+			player.play(soundPath, (err: any) => {
+				if (err) {
+					console.error("Erro ao tocar áudio:", err);
+				}
+			});
 
 			vscode.window.showErrorMessage(
 				`💀 BANG! Your luck ran out.`
@@ -96,4 +105,4 @@ function getAllFiles(dir: string): string[] {
 	return results;
 }
 
-export function deactivate() {}
+export function deactivate() { }
