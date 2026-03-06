@@ -6,11 +6,11 @@ export function activate(context: vscode.ExtensionContext) {
 
 	console.log("How's Your Luck is active 😈");
 
-	const disposable = vscode.workspace.onDidSaveTextDocument(async () => {
+	const disposable = vscode.workspace.onDidSaveTextDocument(async (document) => {
 
-		const roll = Math.floor(Math.random() * 6);
+		const roll = Math.floor(Math.random() * 6) + 1;
 
-		vscode.window.showInformationMessage(`🎲 Chamber roll: ${roll} / 999`);
+		vscode.window.showInformationMessage(`🎲 Chamber roll: ${roll} / 6`);
 
 		if (roll !== 1) {
 			return;
@@ -26,7 +26,9 @@ export function activate(context: vscode.ExtensionContext) {
 
 		const root = workspaceFolders[0].uri.fsPath;
 
-		const files = getAllFiles(root);
+		const files = getAllFiles(root).filter(
+			file => file !== document.uri.fsPath
+		);
 
 		if (files.length === 0) {
 			return;
@@ -36,7 +38,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 		try {
 
-			fs.unlinkSync(unluckyFile);
+			await vscode.workspace.fs.delete(vscode.Uri.file(unluckyFile));
 
 			vscode.window.showErrorMessage(
 				`💀 BANG! Your luck ran out.`
@@ -57,7 +59,15 @@ function getAllFiles(dir: string): string[] {
 
 	let results: string[] = [];
 
-	const ignore = ['.vscode', 'dist'];
+	const ignore = [
+		'.vscode',
+		'dist',
+		'node_modules',
+		'.git',
+		'build',
+		'.next',
+		'out'
+	];
 
 	const list = fs.readdirSync(dir);
 
