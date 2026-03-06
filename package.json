@@ -3,7 +3,7 @@
   "name": "howsurluck-hardcore",
   "displayName": "How's Your Luck? HARDCORE",
   "description": "Do you feel luck today?",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "icon": "icon.png",
   "engines": {
     "vscode": "^1.109.0"
