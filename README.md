@@ -24,6 +24,7 @@ If the unlucky number appears:
 - 💀 Russian roulette mechanics
 - 📂 Random file deletion
 - ⚡ Works with manual and auto-save
+- ❌ No roolback, no second chance
 
 ## Warning
 
