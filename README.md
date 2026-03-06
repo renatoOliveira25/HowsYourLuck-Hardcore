@@ -4,7 +4,7 @@ Do you feel lucky today?
 
 Every time you save a file in Visual Studio Code, fate spins the chamber.
 
-There is a **1 in 1000 chance** that your luck runs out...
+There is a **1 in 6 chance** that your luck runs out...
 
 💀 A random file in your project will be deleted.
 

