@@ -3,7 +3,7 @@
   "name": "howsurluck-hardcore",
   "displayName": "How's Your Luck? HARDCORE",
   "description": "Do you feel luck today?",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "icon": "icon.png",
   "engines": {
     "vscode": "^1.109.0"
@@ -48,8 +48,5 @@
     "npm-run-all": "^4.1.5",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.56.1"
-  },
-  "dependencies": {
-    "play-sound": "^1.1.6"
   }
 }

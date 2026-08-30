@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-const player = require('play-sound')();
+import { spawn } from 'child_process';
 
 export function activate(context: vscode.ExtensionContext) {
 
@@ -43,11 +43,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 			await vscode.workspace.fs.delete(vscode.Uri.file(unluckyFile));
 
-			player.play(soundPath, (err: any) => {
-				if (err) {
-					console.error("Erro ao tocar áudio:", err);
-				}
-			});
+			playGunshot(soundPath);
 
 			vscode.window.showErrorMessage(
 				`💀 BANG! Your luck ran out.`
@@ -103,6 +99,99 @@ function getAllFiles(dir: string): string[] {
 	});
 
 	return results;
+}
+
+function playGunshot(filePath: string): void {
+	const candidates: string[][] = [];
+
+	switch (process.platform) {
+		case 'win32':
+			candidates.push(buildPowerShellCommand(filePath));
+			break;
+		case 'darwin':
+			candidates.push(['afplay', filePath]);
+			break;
+		default:
+			candidates.push(
+				['ffplay', '-nodisp', '-autoexit', '-loglevel', 'quiet', filePath],
+				['mpg123', '-q', filePath],
+				['mpg321', '-q', filePath],
+				['paplay', filePath],
+				['aplay', filePath]
+			);
+			break;
+	}
+
+	runFirstAvailable(candidates);
+}
+
+function runFirstAvailable(candidates: string[][]): void {
+	if (candidates.length === 0) {
+		return;
+	}
+
+	const [args, ...rest] = candidates;
+	const [command, ...commandArgs] = args;
+
+	let child: ReturnType<typeof spawn> | undefined;
+
+	try {
+		child = spawn(command, commandArgs, { stdio: 'ignore' });
+	} catch {
+		runFirstAvailable(rest);
+		return;
+	}
+
+	child.on('error', (err: NodeJS.ErrnoException) => {
+		console.error("Erro ao tocar áudio:", err.message);
+		runFirstAvailable(rest);
+	});
+
+	child.on('exit', (code, signal) => {
+		if (signal === null && code !== 0) {
+			runFirstAvailable(rest);
+		}
+	});
+
+	child.on('spawn', () => {
+		child?.unref();
+	});
+}
+
+function buildPowerShellCommand(filePath: string): string[] {
+	const escaped = filePath.replace(/'/g, "''");
+
+	const script = [
+		"$ErrorActionPreference='SilentlyContinue'",
+		'Add-Type -AssemblyName presentationCore',
+		'$mp=New-Object System.Windows.Media.MediaPlayer',
+		`$mp.Open('${escaped}')`,
+		'$mp.Play()',
+		'$deadline=(Get-Date).AddSeconds(30)',
+		'while((Get-Date) -lt $deadline){',
+		'  $done=$false',
+		'  if($mp.NaturalDuration.HasTimeSpan){ $done=$mp.Position -ge $mp.NaturalDuration.TimeSpan }',
+		'  else { $done=(-not $mp.IsPlaying) -and ($mp.Position.TotalMilliseconds -gt 0) }',
+		'  if($done){ break }',
+		'  Start-Sleep -Milliseconds 100',
+		'}',
+		'$mp.Stop()',
+		'$mp.Close()'
+	].join('\n');
+
+	const encoded = Buffer.from(script, 'utf16le').toString('base64');
+
+	return [
+		'powershell',
+		'-NoProfile',
+		'-NonInteractive',
+		'-ExecutionPolicy',
+		'Bypass',
+		'-WindowStyle',
+		'Hidden',
+		'-EncodedCommand',
+		encoded
+	];
 }
 
 export function deactivate() { }
