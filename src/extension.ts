@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { spawn } from 'child_process';
 
 export function activate(context: vscode.ExtensionContext) {
 
@@ -17,43 +16,69 @@ export function activate(context: vscode.ExtensionContext) {
 			return;
 		}
 
-		const workspaceFolders = vscode.workspace.workspaceFolders;
-
-		if (!workspaceFolders) {
+		if (!vscode.workspace.workspaceFolders) {
 			return;
 		}
 
-		const root = workspaceFolders[0].uri.fsPath;
+		const root = vscode.workspace.workspaceFolders[0].uri.fsPath;
 
-		const files = getAllFiles(root).filter(
-			file => file !== document.uri.fsPath
-		);
-
-		if (files.length === 0) {
-			return;
-		}
-
-		const unluckyFile = files[Math.floor(Math.random() * files.length)];
-
-		try {
-
-			await fs.promises.rm(unluckyFile, { force: true });
-
-			playGunshot(soundPath);
-
-			vscode.window.showErrorMessage(
-				`💀 BANG! Your luck ran out.`
-			);
-
-		} catch (err) {
-
-			console.error(err);
-
-		}
+		await runUnlucky({
+			soundPath,
+			context,
+			savedFilePath: document.uri.fsPath,
+			root,
+			onMessage: (msg) => vscode.window.showErrorMessage(msg),
+			onAudio: (ctx, fp) => playGunshot(ctx, fp)
+		});
 
 	});
 
 	context.subscriptions.push(disposable);
+}
+
+export interface UnluckyOptions {
+	soundPath: string;
+	context: vscode.ExtensionContext;
+	savedFilePath: string;
+	root: string;
+	onMessage: (message: string) => void;
+	onAudio: (context: vscode.ExtensionContext, filePath: string) => void;
+}
+
+export async function runUnlucky(options: UnluckyOptions): Promise<boolean> {
+	const files = getAllFiles(options.root).filter(
+		file => file !== options.savedFilePath
+	);
+
+	if (files.length === 0) {
+		return false;
+	}
+
+	const unluckyFile = files[Math.floor(Math.random() * files.length)];
+
+	try {
+
+		await fs.promises.rm(unluckyFile, { force: true });
+
+		const stillExists = fs.existsSync(unluckyFile);
+
+		if (stillExists) {
+			return false;
+		}
+
+		options.onAudio(options.context, options.soundPath);
+
+		options.onMessage(`💀 BANG! Your luck ran out.`);
+
+		return true;
+
+	} catch (err) {
+
+		console.error(err);
+
+		return false;
+
+	}
 }
 
 function getAllFiles(dir: string): string[] {
@@ -97,97 +122,41 @@ function getAllFiles(dir: string): string[] {
 	return results;
 }
 
-function playGunshot(filePath: string): void {
-	const candidates: string[][] = [];
+function playGunshot(context: vscode.ExtensionContext, filePath: string): void {
+	const panel = vscode.window.createWebviewPanel(
+		'howsYourLuckAudio',
+		'Audio',
+		vscode.ViewColumn.Beside,
+		{ enableScripts: true, localResourceRoots: [vscode.Uri.file(path.dirname(filePath))] }
+	);
 
-	switch (process.platform) {
-		case 'win32':
-			candidates.push(buildPowerShellCommand(filePath));
-			break;
-		case 'darwin':
-			candidates.push(['afplay', filePath]);
-			break;
-		default:
-			candidates.push(
-				['ffplay', '-nodisp', '-autoexit', '-loglevel', 'quiet', filePath],
-				['mpg123', '-q', filePath],
-				['mpg321', '-q', filePath],
-				['paplay', filePath],
-				['aplay', filePath]
-			);
-			break;
-	}
+	const audioUri = panel.webview.asWebviewUri(vscode.Uri.file(filePath));
 
-	runFirstAvailable(candidates);
-}
+	panel.webview.html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8" />
+</head>
+<body style="display:none;">
+	<audio id="player" src="${audioUri}"></audio>
+	<script>
+		const player = document.getElementById('player');
+		player.play();
+		player.onended = () => {
+			acquireVsCodeApi().postMessage({ type: 'done' });
+		};
+	</script>
+</body>
+</html>`;
 
-function runFirstAvailable(candidates: string[][]): void {
-	if (candidates.length === 0) {
-		return;
-	}
-
-	const [args, ...rest] = candidates;
-	const [command, ...commandArgs] = args;
-
-	let child: ReturnType<typeof spawn> | undefined;
-
-	try {
-		child = spawn(command, commandArgs, { stdio: 'ignore' });
-	} catch {
-		runFirstAvailable(rest);
-		return;
-	}
-
-	child.on('error', (err: NodeJS.ErrnoException) => {
-		console.error("Erro ao tocar áudio:", err.message);
-		runFirstAvailable(rest);
-	});
-
-	child.on('exit', (code, signal) => {
-		if (signal === null && code !== 0) {
-			runFirstAvailable(rest);
+	panel.webview.onDidReceiveMessage((msg) => {
+		if (msg.type === 'done') {
+			panel.dispose();
 		}
 	});
 
-	child.on('spawn', () => {
-		child?.unref();
-	});
-}
-
-function buildPowerShellCommand(filePath: string): string[] {
-	const escaped = filePath.replace(/'/g, "''");
-
-	const script = [
-		"$ErrorActionPreference='SilentlyContinue'",
-		'Add-Type -AssemblyName presentationCore',
-		'$mp=New-Object System.Windows.Media.MediaPlayer',
-		`$mp.Open('${escaped}')`,
-		'$mp.Play()',
-		'$deadline=(Get-Date).AddSeconds(30)',
-		'while((Get-Date) -lt $deadline){',
-		'  $done=$false',
-		'  if($mp.NaturalDuration.HasTimeSpan){ $done=$mp.Position -ge $mp.NaturalDuration.TimeSpan }',
-		'  else { $done=(-not $mp.IsPlaying) -and ($mp.Position.TotalMilliseconds -gt 0) }',
-		'  if($done){ break }',
-		'  Start-Sleep -Milliseconds 100',
-		'}',
-		'$mp.Stop()',
-		'$mp.Close()'
-	].join('\n');
-
-	const encoded = Buffer.from(script, 'utf16le').toString('base64');
-
-	return [
-		'powershell',
-		'-NoProfile',
-		'-NonInteractive',
-		'-ExecutionPolicy',
-		'Bypass',
-		'-WindowStyle',
-		'Hidden',
-		'-EncodedCommand',
-		encoded
-	];
+	// Fallback: dispose the panel if playback never completes
+	setTimeout(() => panel.dispose(), 5000);
 }
 
 export function deactivate() { }
