@@ -13,13 +13,9 @@ export function activate(context: vscode.ExtensionContext) {
 
 		const roll = Math.floor(Math.random() * 6) + 1;
 
-		vscode.window.showInformationMessage(`🎲 Chamber roll: ${roll} / 6`);
-
 		if (roll !== 1) {
 			return;
 		}
-
-		vscode.window.showWarningMessage("🎲 Spinning the chamber...");
 
 		const workspaceFolders = vscode.workspace.workspaceFolders;
 
@@ -41,7 +37,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 		try {
 
-			await vscode.workspace.fs.delete(vscode.Uri.file(unluckyFile));
+			await fs.promises.rm(unluckyFile, { force: true });
 
 			playGunshot(soundPath);
 
