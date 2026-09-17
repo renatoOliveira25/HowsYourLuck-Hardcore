@@ -3,7 +3,7 @@
   "name": "howsurluck-hardcore",
   "displayName": "How's Your Luck? HARDCORE",
   "description": "Do you feel luck today?",
-  "version": "1.3.1",
+  "version": "1.3.4",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -53,5 +53,8 @@
     "npm-run-all": "^4.1.5",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.56.1"
+  },
+  "overrides": {
+    "mocha": "^12.0.1"
   }
 }

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import { spawn } from 'child_process';
 
 export function activate(context: vscode.ExtensionContext) {
 
@@ -123,6 +124,103 @@ function getAllFiles(dir: string): string[] {
 }
 
 function playGunshot(context: vscode.ExtensionContext, filePath: string): void {
+	// Native playback is not subject to the browser autoplay policy, so it is
+	// the reliable path on macOS (afplay) and Windows (PowerShell + MediaPlayer).
+	// The webview is only a last-resort fallback (e.g. Linux without media players).
+	runFirstAvailable(getNativeCandidates(filePath), () => {
+		playInWebview(context, filePath);
+	});
+}
+
+function getNativeCandidates(filePath: string): string[][] {
+	switch (process.platform) {
+		case 'win32':
+			return [buildPowerShellCommand(filePath)];
+		case 'darwin':
+			return [['afplay', filePath]];
+		default:
+			return [
+				['ffplay', '-nodisp', '-autoexit', '-loglevel', 'quiet', filePath],
+				['mpg123', '-q', filePath],
+				['mpg321', '-q', filePath],
+				['paplay', filePath],
+				['aplay', filePath]
+			];
+	}
+}
+
+function runFirstAvailable(candidates: string[][], onFail?: () => void): void {
+	if (candidates.length === 0) {
+		onFail?.();
+		return;
+	}
+
+	const [args, ...rest] = candidates;
+	const [command, ...commandArgs] = args;
+
+	let child: ReturnType<typeof spawn> | undefined;
+
+	try {
+		child = spawn(command, commandArgs, { stdio: 'ignore' });
+	} catch (err) {
+		console.error("Erro ao tocar áudio:", err);
+		runFirstAvailable(rest, onFail);
+		return;
+	}
+
+	child.on('error', (err: NodeJS.ErrnoException) => {
+		console.error(`Erro ao tocar áudio com "${command}":`, err.message);
+		runFirstAvailable(rest, onFail);
+	});
+
+	child.on('exit', (code, signal) => {
+		if (signal === null && code !== 0) {
+			runFirstAvailable(rest, onFail);
+		}
+	});
+
+	child.on('spawn', () => {
+		child?.unref();
+	});
+}
+
+function buildPowerShellCommand(filePath: string): string[] {
+	const escaped = filePath.replace(/'/g, "''");
+
+	const script = [
+		"$ErrorActionPreference='SilentlyContinue'",
+		'Add-Type -AssemblyName presentationCore',
+		'$mp=New-Object System.Windows.Media.MediaPlayer',
+		`$mp.Open('${escaped}')`,
+		'$mp.Play()',
+		'$deadline=(Get-Date).AddSeconds(30)',
+		'while((Get-Date) -lt $deadline){',
+		'  $done=$false',
+		'  if($mp.NaturalDuration.HasTimeSpan){ $done=$mp.Position -ge $mp.NaturalDuration.TimeSpan }',
+		'  else { $done=(-not $mp.IsPlaying) -and ($mp.Position.TotalMilliseconds -gt 0) }',
+		'  if($done){ break }',
+		'  Start-Sleep -Milliseconds 100',
+		'}',
+		'$mp.Stop()',
+		'$mp.Close()'
+	].join('\n');
+
+	const encoded = Buffer.from(script, 'utf16le').toString('base64');
+
+	return [
+		'powershell',
+		'-NoProfile',
+		'-NonInteractive',
+		'-ExecutionPolicy',
+		'Bypass',
+		'-WindowStyle',
+		'Hidden',
+		'-EncodedCommand',
+		encoded
+	];
+}
+
+function playInWebview(context: vscode.ExtensionContext, filePath: string): void {
 	try {
 		const panel = vscode.window.createWebviewPanel(
 			'howsYourLuckAudio',
