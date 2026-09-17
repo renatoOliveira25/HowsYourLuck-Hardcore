@@ -123,40 +123,150 @@ function getAllFiles(dir: string): string[] {
 }
 
 function playGunshot(context: vscode.ExtensionContext, filePath: string): void {
-	const panel = vscode.window.createWebviewPanel(
-		'howsYourLuckAudio',
-		'Audio',
-		vscode.ViewColumn.Beside,
-		{ enableScripts: true, localResourceRoots: [vscode.Uri.file(path.dirname(filePath))] }
-	);
+	try {
+		const panel = vscode.window.createWebviewPanel(
+			'howsYourLuckAudio',
+			'Audio',
+			vscode.ViewColumn.Beside,
+			{ enableScripts: true, localResourceRoots: [vscode.Uri.file(path.dirname(filePath))] }
+		);
 
-	const audioUri = panel.webview.asWebviewUri(vscode.Uri.file(filePath));
+		const audioUri = panel.webview.asWebviewUri(vscode.Uri.file(filePath));
 
-	panel.webview.html = `<!DOCTYPE html>
+		panel.webview.html = buildAudioHtml(audioUri.toString());
+
+		let disposed = false;
+
+		const disposePanel = () => {
+			if (!disposed) {
+				disposed = true;
+				panel.dispose();
+			}
+		};
+
+		panel.webview.onDidReceiveMessage((msg) => {
+			if (msg.type === 'done' || msg.type === 'error') {
+				disposePanel();
+			}
+		});
+
+		// Fallback: never leak an empty webview panel
+		const fallbackTimeout = setTimeout(disposePanel, 6000);
+
+		panel.onDidDispose(() => {
+			clearTimeout(fallbackTimeout);
+		});
+	} catch (err) {
+		console.error("Erro ao criar player de áudio:", err);
+	}
+}
+
+export function buildAudioHtml(audioUri: string): string {
+	return `<!DOCTYPE html>
 <html lang="en">
 <head>
 	<meta charset="UTF-8" />
 </head>
 <body style="display:none;">
-	<audio id="player" src="${audioUri}"></audio>
+	<audio id="player" src="${audioUri}" preload="auto" autoplay></audio>
 	<script>
 		const player = document.getElementById('player');
-		player.play();
-		player.onended = () => {
-			acquireVsCodeApi().postMessage({ type: 'done' });
-		};
+		const vscode = acquireVsCodeApi();
+
+		const finish = (type) => vscode.postMessage({ type });
+
+		player.onended = () => finish('done');
+		player.onerror = () => finish('error');
+
+		const ATTEMPTS = 40;
+		const INTERVAL = 150;
+
+		function tryPlay(attempt) {
+			try {
+				const p = player.play();
+				if (p && typeof p.then === 'function') {
+					p.then(() => {
+						clearRetry();
+					}).catch((err) => {
+						if (attempt < ATTEMPTS) {
+							retryTimer = setTimeout(() => tryPlay(attempt + 1), INTERVAL);
+						} else {
+							playViaWebAudio();
+						}
+					});
+				}
+			} catch (err) {
+				if (attempt < ATTEMPTS) {
+					retryTimer = setTimeout(() => tryPlay(attempt + 1), INTERVAL);
+				} else {
+					playViaWebAudio();
+				}
+			}
+		}
+
+		let retryTimer;
+
+		function clearRetry() {
+			clearTimeout(retryTimer);
+		}
+
+		function playViaWebAudio() {
+			if (!window.AudioContext && !window.webkitAudioContext) {
+				console.error('Web Audio API not available');
+				finish('error');
+				return;
+			}
+
+			const Ctx = window.AudioContext || window.webkitAudioContext;
+			const audioContext = new Ctx();
+
+			const ctxState = (audioContext.state && audioContext.state === 'suspended')
+				? audioContext.resume()
+				: Promise.resolve();
+
+			ctxState
+				.then(() => fetch(${JSON.stringify(audioUri)}))
+				.then((res) => {
+					if (!res.ok) {
+						throw new Error('HTTP ' + res.status);
+					}
+					return res.arrayBuffer();
+				})
+				.then((buffer) => audioContext.decodeAudioData(buffer))
+				.then((audioBuffer) => {
+					const source = audioContext.createBufferSource();
+					source.buffer = audioBuffer;
+					source.connect(audioContext.destination);
+					source.onended = () => {
+						audioContext.close();
+						finish('done');
+					};
+					source.start(0);
+				})
+				.catch((err) => {
+					console.error('Web Audio playback failed:', err);
+					finish('error');
+				});
+		}
+
+		// Wait for the media to be loadable before attempting playback,
+		// then retry within the transient user activation window.
+		if (player.readyState >= 2) {
+			tryPlay(0);
+		} else {
+			player.addEventListener('canplay', () => tryPlay(0), { once: true });
+			player.load();
+		}
+
+		// Last resort: play on the next real interaction with the panel.
+		document.addEventListener('pointerdown', () => {
+			if (player.paused) {
+				tryPlay(0);
+			}
+		}, { once: true });
 	</script>
 </body>
 </html>`;
-
-	panel.webview.onDidReceiveMessage((msg) => {
-		if (msg.type === 'done') {
-			panel.dispose();
-		}
-	});
-
-	// Fallback: dispose the panel if playback never completes
-	setTimeout(() => panel.dispose(), 5000);
 }
 
 export function deactivate() { }

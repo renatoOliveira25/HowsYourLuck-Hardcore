@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import * as vscode from 'vscode';
-import { runUnlucky } from '../extension';
+import { buildAudioHtml, runUnlucky } from '../extension';
 
 suite('Extension Test Suite', () => {
 	vscode.window.showInformationMessage('Start all tests.');
@@ -60,5 +60,17 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(ok, false);
 		assert.strictEqual(messages.length, 0, 'no message when nothing is removed');
 		assert.strictEqual(audioPlayed, false, 'no audio when nothing is removed');
+	});
+
+	test('buildAudioHtml embeds the audio uri with autoplay and preload', () => {
+		const uri = 'vscode-webview-resource://audio/fahhhhh.mp3';
+		const html = buildAudioHtml(uri);
+
+		assert.match(html, /<audio id="player"/, 'should have an audio element');
+		assert.match(html, /autoplay/, 'should autoplay');
+		assert.match(html, /preload="auto"/, 'should preload the audio');
+		assert.ok(html.includes(uri), 'should embed the audio uri');
+		assert.match(html, /player\.play\(\)/, 'should call play()');
+		assert.match(html, /playViaWebAudio/, 'should have a Web Audio fallback');
 	});
 });
